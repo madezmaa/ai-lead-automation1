@@ -1,0 +1,64 @@
+name: ai-lead-automation
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lead}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lead}
+      POSTGRES_DB: ${POSTGRES_DB:-leads}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-lead}:${POSTGRES_PASSWORD:-lead}@db:5432/${POSTGRES_DB:-leads}
+      AUTO_CREATE_SCHEMA: ${AUTO_CREATE_SCHEMA:-true}
+      OLLAMA_ENABLED: ${OLLAMA_ENABLED:-true}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
+      OLLAMA_MAX_RETRIES: ${OLLAMA_MAX_RETRIES:-2}
+      NOTIFY_WEBHOOK_URL: ${NOTIFY_WEBHOOK_URL:-}
+      NOTIFY_TIMEOUT_SECONDS: ${NOTIFY_TIMEOUT_SECONDS:-3}
+      API_KEY: ${API_KEY:-}
+      AI_BLEND_WEIGHT: ${AI_BLEND_WEIGHT:-0.6}
+      QUALIFIED_THRESHOLD: ${QUALIFIED_THRESHOLD:-70}
+      NURTURE_THRESHOLD: ${NURTURE_THRESHOLD:-40}
+      MIN_BUDGET: ${MIN_BUDGET:-1000}
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  n8n:
+    image: n8nio/n8n:latest
+    profiles: ["n8n"]
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_SECURE_COOKIE: "false"
+      WEBHOOK_URL: http://localhost:5678/
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  pgdata:
+  n8n_data:

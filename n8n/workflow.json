@@ -1,0 +1,345 @@
+{
+  "name": "AI Lead Qualification - Webhook to API",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-qualification",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "b1c6a1d0-0001-4a10-9000-000000000001",
+      "name": "Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "b1c6a1d0-0001-4a10-9000-00000000ffff"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/v1/leads",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $json.body.email }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "b1c6a1d0-0002-4a10-9000-000000000002",
+      "name": "Create Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b1c6a1d0-0003-4a10-9000-000000000003",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1c6a1d0-0003-4a10-9000-000000000010",
+      "name": "Lead Created?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {},
+      "id": "b1c6a1d0-0004-4a10-9000-000000000004",
+      "name": "Skip Duplicate",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [660, -160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8000/api/v1/leads/{{ $json.id }}/qualify",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"use_ai\": true\n}",
+        "options": {}
+      },
+      "id": "b1c6a1d0-0005-4a10-9000-000000000005",
+      "name": "Qualify Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 80]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b1c6a1d0-0006-4a10-9000-000000000006",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "qualified",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "qualified"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b1c6a1d0-0007-4a10-9000-000000000007",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "nurture",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "nurture"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b1c6a1d0-0008-4a10-9000-000000000008",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "disqualified",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "disqualified"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1c6a1d0-0009-4a10-9000-000000000009",
+      "name": "Route by Decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [880, 80]
+    },
+    {
+      "parameters": {},
+      "id": "b1c6a1d0-0010-4a10-9000-000000000011",
+      "name": "Notify Sales (qualified)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1100, -40]
+    },
+    {
+      "parameters": {},
+      "id": "b1c6a1d0-0011-4a10-9000-000000000012",
+      "name": "Add to Nurture",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1100, 80]
+    },
+    {
+      "parameters": {},
+      "id": "b1c6a1d0-0012-4a10-9000-000000000013",
+      "name": "Mark Disqualified",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://host.docker.internal:8000/api/v1/leads/{{ $json.lead_id }}/follow-up-draft",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"use_ai\": true,\n  \"tone\": \"friendly\"\n}",
+        "options": {}
+      },
+      "id": "b1c6a1d0-0014-4a10-9000-000000000015",
+      "name": "Draft Follow-up (qualified)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, -40],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## AI Lead Qualification flow\n\n1. Receive a lead on the webhook.\n2. Create it in the API (`POST /api/v1/leads`, idempotent via `Idempotency-Key` = email).\n3. Qualify it (`POST /api/v1/leads/{id}/qualify`) - deterministic rules + Ollama.\n4. Route on `decision`: `qualified` / `nurture` / `disqualified`.\n5. Qualified leads get an AI follow-up draft (`POST /api/v1/leads/{id}/follow-up-draft`).\n\n**Change the base URL** (`host.docker.internal:8000`) if the API runs elsewhere.\nIf the API uses `API_KEY`, add a `Header Auth` credential to both HTTP nodes.",
+        "height": 300,
+        "width": 380
+      },
+      "id": "b1c6a1d0-0013-4a10-9000-000000000014",
+      "name": "How this workflow works",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, 260]
+    }
+  ],
+  "connections": {
+    "Lead Webhook": {
+      "main": [
+        [
+          {
+            "node": "Create Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Lead": {
+      "main": [
+        [
+          {
+            "node": "Lead Created?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Created?": {
+      "main": [
+        [
+          {
+            "node": "Qualify Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualify Lead": {
+      "main": [
+        [
+          {
+            "node": "Route by Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Decision": {
+      "main": [
+        [
+          {
+            "node": "Notify Sales (qualified)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Add to Nurture",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Disqualified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Sales (qualified)": {
+      "main": [
+        [
+          {
+            "node": "Draft Follow-up (qualified)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "name": "lead-qualification"
+    }
+  ]
+}
