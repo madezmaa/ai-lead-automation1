@@ -42,11 +42,20 @@ webhook / API ──► POST /api/v1/leads ──► PostgreSQL
   `new → qualifying → qualified|nurture|disqualified|failed`, `→ archived`, `archived → new`.
   Illegal transitions return **409**.
 - **Audit trail** – every status change writes `lead_status_events`; every qualification stores
-  rules output, AI output, blend flags and model in `qualification_results`.
+  rules output, AI output, blend flags, model and **recommended action** in
+  `qualification_results`.
+- **Recommended action** – derived only from the final decision (`sales_follow_up`,
+  `add_to_nurture`, `disqualify`, fallback `manual_review`); the LLM can never influence it.
+- **CRM-ready record** – `GET /api/v1/leads/{id}/crm-record` returns a clean, structured
+  record (contact, company, qualification, recommended action) for a CRM/iPaaS consumer.
+  This is the integration boundary: no external CRM is contacted by the API itself.
 - **Follow-up drafts** – `POST /api/v1/leads/{id}/follow-up-draft` returns an AI-written
-  email (subject + body) with a deterministic template fallback.
+  email (subject + body) with a deterministic template fallback. Drafts are never sent.
 - **Notifications** – set `NOTIFY_WEBHOOK_URL` and every completed qualification POSTs a JSON
-  payload (`event: lead.<decision>`) to your endpoint. Best-effort, never fails the request.
+  payload (`event: lead.<decision>`, including the recommended action) to your endpoint.
+  Best-effort, never fails the request, and every attempt (delivered / failed / skipped) is
+  recorded in `notification_logs` and readable via
+  `GET /api/v1/leads/{id}/notifications`.
 - **Security/config** – optional `API_KEY` (`X-API-Key` header, constant-time compare),
   no secrets in the repo, `.env.example` documents every setting, non-root Docker image.
 
@@ -60,11 +69,14 @@ webhook / API ──► POST /api/v1/leads ──► PostgreSQL
 | `GET` | `/api/v1/leads/{id}` | Get one lead |
 | `POST` | `/api/v1/leads/{id}/qualify` | Run rules + AI, store result, transition status |
 | `GET` | `/api/v1/leads/{id}/qualifications` | Qualification history |
+| `GET` | `/api/v1/leads/{id}/crm-record` | CRM-ready record of the latest qualification (409 `not_qualified` before qualifying) |
+| `GET` | `/api/v1/leads/{id}/notifications` | Notification delivery log (`delivered` / `failed` / `skipped`) |
 | `POST` | `/api/v1/leads/{id}/follow-up-draft` | AI follow-up email draft (template fallback) |
 | `PATCH` | `/api/v1/leads/{id}/status` | Manual state transition (409 if illegal) |
 | `GET` | `/docs` · `/openapi.json` | Interactive docs |
 
-Errors are uniform: `{"detail": "...", "code": "duplicate_lead" | "invalid_transition" | "lead_not_found"}`.
+Errors are uniform:
+`{"detail": "...", "code": "duplicate_lead" | "invalid_transition" | "lead_not_found" | "not_qualified"}`.
 
 ```bash
 # create
@@ -117,6 +129,7 @@ export DATABASE_URL=postgresql+psycopg://lead:lead@localhost:5432/leads
 alembic upgrade head          # apply migrations (fresh DB)
 alembic stamp head            # existing DB already built by create_all
 alembic revision --autogenerate -m "describe change"   # after editing models
+alembic check                 # fail if models and migrations drift apart
 ```
 
 ## Docker Compose
@@ -187,7 +200,7 @@ truth; anything else returns **409 `invalid_transition`**.
 ```powershell
 .\.venv\Scripts\ruff.exe check .          # lint
 .\.venv\Scripts\ruff.exe format .         # format
-.\.venv\Scripts\python.exe -m pytest      # 133 tests (SQLite by default)
+.\.venv\Scripts\python.exe -m pytest      # 146 tests (SQLite by default)
 
 # same suite against real PostgreSQL:
 $env:TEST_DATABASE_URL='postgresql+psycopg://lead:lead@localhost:5432/leads_test'
@@ -214,19 +227,20 @@ app/
   main.py            FastAPI factory, exception handlers, logging
   config.py          Settings (env/.env)
   models.py          SQLAlchemy models: leads, qualification_results,
-                     lead_status_events, idempotency_keys
+                     lead_status_events, idempotency_keys, notification_logs
   schemas.py         Pydantic request/response models (validation + normalization hooks)
   normalization.py   email/phone/country/website/source normalizers
   rules.py           deterministic scoring engine
-  domain.py          LeadProfile, rules/AI results, decide() blending
+  domain.py          LeadProfile, rules/AI results, decide() blending, recommended actions
   ai.py              Ollama client: structured qualification, retries, follow-up drafts
   state_machine.py   statuses + ALLOWED_TRANSITIONS
   service.py         transactions, create/qualify/transition orchestration
-  notifications.py   outbound webhook notifications
+  notifications.py   outbound webhook notifications + delivery payload
+  crm.py             CRM integration boundary (CRM-ready record builder)
   security.py        API-key dependency
   routers/           leads + health endpoints
 migrations/          Alembic migrations
-tests/               133 unit/API/live tests
+tests/               146 unit/API/live tests
 scripts/             smoke_test.ps1 / smoke_test.sh
 n8n/workflow.json    importable n8n workflow
 Dockerfile, docker-compose.yml, .github/workflows/ci.yml
@@ -236,7 +250,15 @@ Dockerfile, docker-compose.yml, .github/workflows/ci.yml
 
 - Schema bootstrap uses `create_all` only when explicitly enabled (dev convenience);
   production deployments run `alembic upgrade head` with `AUTO_CREATE_SCHEMA=false`
-  (the default).
+  (the default). The Docker image ships `alembic.ini` + `migrations/`, so
+  `docker compose run --rm api alembic upgrade head` works from the container.
 - Docker containers can reach Ollama only when Ollama listens on the host interface
   (`OLLAMA_HOST=0.0.0.0`); otherwise the deterministic fallback covers qualification.
-- Notifications are fire-and-forget (no delivery persistence/retry queue).
+- Notifications have no retry queue: every attempt is recorded once
+  (`delivered` / `failed` / `skipped` in `notification_logs`) but failures are not retried.
+- No external CRM is contacted. `GET /api/v1/leads/{id}/crm-record` produces the
+  CRM-ready record; wiring it to a real CRM happens downstream (e.g. in n8n).
+- Follow-up drafts are generated only — the system never sends messages to customers.
+- Not executed in this environment: the n8n workflow (JSON validated and its API calls
+  verified individually) and the Docker image build (Docker daemon unavailable; compose
+  config validated statically, image/stack exercised in CI).

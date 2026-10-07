@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.config import Settings, get_settings
 from app.db import configure_engine, create_schema
-from app.errors import DuplicateLeadError, LeadNotFoundError
+from app.errors import DuplicateLeadError, LeadNotFoundError, NotQualifiedError
 from app.routers import health, leads
 from app.state_machine import InvalidTransitionError
 
@@ -71,6 +71,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(DuplicateLeadError)
     async def on_duplicate(_: Request, exc: DuplicateLeadError) -> JSONResponse:
         return _json_error(409, str(exc), "duplicate_lead")
+
+    @app.exception_handler(NotQualifiedError)
+    async def on_not_qualified(_: Request, exc: NotQualifiedError) -> JSONResponse:
+        return _json_error(409, str(exc), "not_qualified")
 
     @app.exception_handler(InvalidTransitionError)
     async def on_invalid_transition(_: Request, exc: InvalidTransitionError) -> JSONResponse:

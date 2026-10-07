@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -136,6 +136,7 @@ class QualificationResultRead(BaseModel):
     lead_id: uuid.UUID
     decision: str
     score: int
+    recommended_action: str
     reason: str
     rules_output: dict
     ai_output: dict | None
@@ -151,6 +152,31 @@ class QualificationResultRead(BaseModel):
 class QualificationList(BaseModel):
     items: list[QualificationResultRead]
     total: int
+
+
+class NotificationLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    lead_id: uuid.UUID
+    event: str
+    channel: str
+    target: str | None
+    status: str
+    error: str | None
+    created_at: datetime
+
+
+class NotificationLogList(BaseModel):
+    items: list[NotificationLogRead]
+    total: int
+
+
+class CrmRecordRead(BaseModel):
+    """CRM-ready record for the latest qualification of a lead."""
+
+    lead_id: uuid.UUID
+    record: dict[str, Any]
 
 
 class StatusUpdateRequest(BaseModel):

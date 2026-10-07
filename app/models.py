@@ -1,4 +1,5 @@
-"""SQLAlchemy ORM models: ``leads``, ``qualification_results``, ``lead_status_events``."""
+"""SQLAlchemy ORM models: leads, qualification_results, lead_status_events,
+idempotency_keys, notification_logs."""
 
 from __future__ import annotations
 
@@ -72,6 +73,11 @@ class Lead(Base):
         cascade="all, delete-orphan",
         order_by="LeadStatusEvent.id.asc()",
     )
+    notifications: Mapped[list[NotificationLog]] = relationship(
+        back_populates="lead",
+        cascade="all, delete-orphan",
+        order_by="NotificationLog.id.desc()",
+    )
 
 
 class QualificationResult(Base):
@@ -90,6 +96,9 @@ class QualificationResult(Base):
     fallback_used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     rules_overrode_ai: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     model: Mapped[str | None] = mapped_column(String(100))
+    recommended_action: Mapped[str] = mapped_column(
+        String(64), default="manual_review", server_default="", nullable=False
+    )
     state_from: Mapped[str | None] = mapped_column(String(32))
     state_to: Mapped[str] = mapped_column(String(32), nullable=False)
 
@@ -127,3 +136,24 @@ class IdempotencyKey(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
+
+
+class NotificationLog(Base):
+    """Audit row for every outbound notification attempt (incl. skipped ones)."""
+
+    __tablename__ = "notification_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("leads.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    channel: Mapped[str] = mapped_column(String(32), default="webhook", nullable=False)
+    target: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+    lead: Mapped[Lead] = relationship(back_populates="notifications")

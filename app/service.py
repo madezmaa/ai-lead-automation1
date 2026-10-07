@@ -15,13 +15,15 @@ from app.domain import (
     Decision,
     LeadProfile,
     QualificationOutcome,
+    action_for_decision,
     decide,
 )
-from app.errors import DuplicateLeadError, LeadNotFoundError
+from app.errors import DuplicateLeadError, LeadNotFoundError, NotQualifiedError
 from app.models import (
     IdempotencyKey,
     Lead,
     LeadStatusEvent,
+    NotificationLog,
     QualificationResult,
     utcnow,
 )
@@ -208,6 +210,7 @@ def qualify_lead(
         lead_id=lead.id,
         decision=outcome.decision.value,
         score=outcome.score,
+        recommended_action=action_for_decision(outcome.decision),
         reason=outcome.reason,
         rules_output=rules_result.to_dict(),
         ai_output=ai_result.to_dict() if ai_result is not None else None,
@@ -260,5 +263,43 @@ def list_qualifications(
     )
     rows = session.scalars(
         query.order_by(QualificationResult.created_at.desc()).limit(limit).offset(offset)
+    ).all()
+    return rows, total
+
+
+def latest_qualification(session: Session, lead_id: object) -> tuple[Lead, QualificationResult]:
+    """Return the lead with its most recent qualification result.
+
+    Raises :class:`NotQualifiedError` when the lead has never been qualified.
+    """
+    lead = get_lead(session, lead_id)
+    result = session.scalar(
+        select(QualificationResult)
+        .where(QualificationResult.lead_id == lead.id)
+        .order_by(QualificationResult.id.desc())
+        .limit(1)
+    )
+    if result is None:
+        raise NotQualifiedError(lead_id)
+    return lead, result
+
+
+def list_notifications(
+    session: Session, lead_id: object, *, limit: int = 20, offset: int = 0
+) -> tuple[Sequence[NotificationLog], int]:
+    """Return the notification delivery log for a lead (newest first)."""
+    lead = get_lead(session, lead_id)
+    total = int(
+        session.scalar(
+            select(func.count(NotificationLog.id)).where(NotificationLog.lead_id == lead.id)
+        )
+        or 0
+    )
+    rows = session.scalars(
+        select(NotificationLog)
+        .where(NotificationLog.lead_id == lead.id)
+        .order_by(NotificationLog.id.desc())
+        .limit(limit)
+        .offset(offset)
     ).all()
     return rows, total

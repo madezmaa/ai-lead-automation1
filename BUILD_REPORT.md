@@ -1,8 +1,9 @@
 # Build Report
 
 **Project:** AI Lead Qualification & CRM Automation (FastAPI + PostgreSQL + Ollama + n8n)
-**Status:** Complete — implementation committed as `c1c0f3a Initial project implementation`;
-this session finished the outstanding end-to-end verification and this report.
+**Status:** MVP complete. Core implementation in `c1c0f3a`, E2E verification + this report in
+`1fc7742`, production-safe schema default in `11b538b`, recommended action / CRM record /
+notification log in the final MVP commit (see the last section below for its verification).
 
 ## Work completed in this session
 
@@ -81,7 +82,6 @@ were cleaned up afterwards (port 8000 released).
 
 - Containers reach Ollama only when it listens on the host interface
   (`OLLAMA_HOST=0.0.0.0`); otherwise the deterministic rules fallback applies.
-- Notifications are fire-and-forget (no delivery persistence/retry queue).
 
 ## Production-safe schema management (follow-up change)
 
@@ -103,3 +103,70 @@ pytest tests/test_api.py                    → 21 passed in 4.83s (startup/life
 ruff check app/config.py                    → All checks passed!
 ruff format --check app/config.py README.md → 2 files already formatted
 ```
+
+## MVP completion: recommended action, CRM record, notification log
+
+Remaining gaps against the MVP flow (recommended action → CRM-ready record →
+notification/action record with failure visibility) were closed without touching the
+scoring authority, the state machine or the n8n workflow.
+
+### Changes
+
+| Area | Change |
+|---|---|
+| Recommended action | `app/domain.py`: `action_for_decision()` maps the final decision to `sales_follow_up` / `add_to_nurture` / `disqualify` (fallback `manual_review`). Derived only from the rules-authoritative decision — the LLM cannot influence it. Persisted in `qualification_results.recommended_action` and returned by the qualify/history endpoints and the webhook payload. |
+| CRM integration boundary | New `app/crm.py` (`build_crm_record`) + `GET /api/v1/leads/{id}/crm-record`: structured contact/company/qualification/action record. 409 `not_qualified` before the first qualification, 404 for unknown leads. No external CRM is invented or contacted. |
+| Notification reliability | New `notification_logs` table: every qualification writes one row — `delivered`, `failed` (with the error reason from `send_webhook(on_error=...)`), or `skipped` when `NOTIFY_WEBHOOK_URL` is unset. Readable via `GET /api/v1/leads/{id}/notifications`. No queue/infrastructure added. |
+| Migration | New Alembic revision `c4a91f7b2e10` (adds `recommended_action` with backfill for existing rows, creates `notification_logs`); downgrade included. |
+| Docker | `Dockerfile` now also copies `alembic.ini` + `migrations/`, so `docker compose run --rm api alembic upgrade head` works in the production (`AUTO_CREATE_SCHEMA=false`) configuration. CMD unchanged. |
+| README | API table, features, layout, test count and known limitations updated to match reality. |
+
+The n8n workflow was **not** modified: its three HTTP nodes call endpoints that exist
+(`POST /leads`, `POST /leads/{id}/qualify`, `POST /leads/{id}/follow-up-draft`), its
+expressions (`$json.body`, `$json.id`, `$json.decision`, `$json.lead_id`) match actual
+response shapes, and its connection graph is complete.
+
+### Verification performed (this change)
+
+```
+pytest tests/test_crm_actions.py tests/test_notifications.py tests/test_api.py
+                                                   → 40 passed in 6.57s
+pytest (full suite, once after the change)        → 146 passed in 40.30s (133 → 146)
+ruff check .                                       → All checks passed!
+ruff format --check .                              → 37 files already formatted
+
+alembic upgrade head (fresh SQLite)                → both revisions applied
+  tables: alembic_version, leads, qualification_results,
+          lead_status_events, idempotency_keys, notification_logs
+  qualification_results includes recommended_action
+alembic downgrade -1 && alembic upgrade head       → reversible
+alembic check                                      → "No new upgrade operations detected"
+                                                     (models ↔ migrations in sync)
+```
+
+Live E2E (uvicorn on `127.0.0.1:8011`, throwaway SQLite, real Ollama reachable):
+
+```
+create:       201, demo@acme.io
+qualify:      200, decision=qualified score=94 action=sales_follow_up
+crm-record:   200, recommended_action=sales_follow_up, contact normalized
+notifications:200, total=1, status=skipped (no NOTIFY_WEBHOOK_URL), event=lead.qualified
+crm before qualify: 409 code=not_qualified
+```
+
+### Not verified / outside this environment
+
+- **Docker image build & compose stack**: Docker daemon unavailable on this machine.
+  Validated statically (`docker compose config -q` passes, Dockerfile paths correct);
+  image/stack build runs in CI.
+- **n8n execution**: workflow JSON parses and every API call it makes was verified
+  individually over HTTP, but the workflow itself was never executed in a live n8n
+  instance here.
+- **Real webhook delivery**: delivery/failure paths are covered by tests with mock
+  receivers; no third-party endpoint was contacted.
+- **PostgreSQL test suite**: run in CI (`postgres:16-alpine`); local runs used SQLite.
+
+### Final state
+
+- 146 tests pass, Ruff clean, formatting clean, migrations in sync with models,
+  README/BUILD_REPORT match the implementation. Working tree committed and pushed.

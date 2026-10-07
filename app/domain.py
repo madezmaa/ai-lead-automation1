@@ -27,6 +27,23 @@ def decision_for_score(score: int, qualified_threshold: int, nurture_threshold: 
     return Decision.DISQUALIFIED
 
 
+ACTION_BY_DECISION: dict[str, str] = {
+    Decision.QUALIFIED.value: "sales_follow_up",
+    Decision.NURTURE.value: "add_to_nurture",
+    Decision.DISQUALIFIED.value: "disqualify",
+}
+
+
+def action_for_decision(decision: Decision | str) -> str:
+    """Deterministic recommended action for a decision.
+
+    The action is derived only from the (rules-authoritative) decision, so the
+    LLM layer can never influence it.
+    """
+    key = decision.value if isinstance(decision, Decision) else str(decision)
+    return ACTION_BY_DECISION.get(key, "manual_review")
+
+
 @dataclass(frozen=True, slots=True)
 class LeadProfile:
     """A normalized, dependency-free snapshot of a lead used for scoring."""
