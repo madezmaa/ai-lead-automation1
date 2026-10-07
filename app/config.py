@@ -31,7 +31,9 @@ class Settings(BaseSettings):
 
     # --- database --------------------------------------------------------
     database_url: str = "postgresql+psycopg://lead:lead@localhost:5432/leads"
-    auto_create_schema: bool = True
+    # Production-safe default: the schema must be managed with `alembic upgrade head`.
+    # Local development opts in via AUTO_CREATE_SCHEMA=true (.env / docker-compose).
+    auto_create_schema: bool = False
 
     # --- Ollama ----------------------------------------------------------
     ollama_enabled: bool = True

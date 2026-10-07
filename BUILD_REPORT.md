@@ -79,8 +79,27 @@ were cleaned up afterwards (port 8000 released).
 
 ## Known limitations (unchanged)
 
-- Schema bootstrap uses `create_all` (`AUTO_CREATE_SCHEMA=true`); production should use
-  `alembic upgrade head` + `AUTO_CREATE_SCHEMA=false`.
 - Containers reach Ollama only when it listens on the host interface
   (`OLLAMA_HOST=0.0.0.0`); otherwise the deterministic rules fallback applies.
 - Notifications are fire-and-forget (no delivery persistence/retry queue).
+
+## Production-safe schema management (follow-up change)
+
+`AUTO_CREATE_SCHEMA` now defaults to **`false`** in code (`app/config.py`), so a
+production deployment never auto-creates tables and must run `alembic upgrade head`.
+Local development and tests are unchanged:
+
+- `.env.example` / `.env` still set `AUTO_CREATE_SCHEMA=true` (dev convenience).
+- `docker-compose.yml` still passes `${AUTO_CREATE_SCHEMA:-true}` for the local stack.
+- `tests/conftest.py` already sets `auto_create_schema: True` explicitly.
+- README config table, Alembic section and limitations updated to match.
+
+Verification:
+
+```
+Settings(_env_file=None).auto_create_schema → False
+AUTO_CREATE_SCHEMA=true env override        → True
+pytest tests/test_api.py                    → 21 passed in 4.83s (startup/lifespan paths)
+ruff check app/config.py                    → All checks passed!
+ruff format --check app/config.py README.md → 2 files already formatted
+```

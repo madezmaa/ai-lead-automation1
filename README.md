@@ -108,8 +108,9 @@ Linux/macOS: use `.venv/bin/...` instead.
 
 ### Using Alembic instead of auto-create
 
-The API bootstraps the schema with `create_all` when `AUTO_CREATE_SCHEMA=true` (default).
-For migration-managed environments:
+The API bootstraps the schema with `create_all` only when `AUTO_CREATE_SCHEMA=true`
+(the dev `.env` / docker-compose default; the code default is `false` so production
+deployments never auto-create tables). For migration-managed environments:
 
 ```bash
 export DATABASE_URL=postgresql+psycopg://lead:lead@localhost:5432/leads
@@ -151,7 +152,7 @@ All settings come from environment variables / `.env` (see [`.env.example`](.env
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | `postgresql+psycopg://lead:lead@localhost:5432/leads` | SQLAlchemy URL (PostgreSQL/Supabase/SQLite) |
-| `AUTO_CREATE_SCHEMA` | `true` | Create tables on startup |
+| `AUTO_CREATE_SCHEMA` | `false` (dev `.env`: `true`) | Create tables on startup instead of using Alembic |
 | `API_KEY` | *(unset)* | When set, all `/api/v1` endpoints require `X-API-Key` |
 | `LOG_LEVEL` | `INFO` | Root logging level |
 | `OLLAMA_ENABLED` | `true` | Use the AI layer |
@@ -233,8 +234,9 @@ Dockerfile, docker-compose.yml, .github/workflows/ci.yml
 
 ## Known limitations
 
-- Schema bootstrap uses `create_all` for dev convenience; production deployments should run
-  `alembic upgrade head` and set `AUTO_CREATE_SCHEMA=false`.
+- Schema bootstrap uses `create_all` only when explicitly enabled (dev convenience);
+  production deployments run `alembic upgrade head` with `AUTO_CREATE_SCHEMA=false`
+  (the default).
 - Docker containers can reach Ollama only when Ollama listens on the host interface
   (`OLLAMA_HOST=0.0.0.0`); otherwise the deterministic fallback covers qualification.
 - Notifications are fire-and-forget (no delivery persistence/retry queue).
