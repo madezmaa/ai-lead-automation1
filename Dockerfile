@@ -12,9 +12,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY demo ./demo
 COPY alembic.ini migrations ./
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN useradd --create-home --uid 10001 appuser \
-    && chown -R appuser:appuser /srv/app
+    && chown -R appuser:appuser /srv/app \
+    && chmod 755 /usr/local/bin/docker-entrypoint.sh
 USER appuser
 
 EXPOSE 8000
@@ -25,4 +27,6 @@ ENV PORT=8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import os, sys, urllib.request; p = os.environ.get('PORT', '8000'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/health', timeout=4).status == 200 else 1)"
 
+# Apply migrations before serving; honours Render pre-deploy and Blitz direct start.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

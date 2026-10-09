@@ -6,10 +6,27 @@ All configuration is read from environment variables (optionally via a local
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Local-development default. Production must inject the connection string; the
+# app logs a clear warning instead of silently targeting localhost.
+DEFAULT_DATABASE_URL = "postgresql+psycopg://lead:lead@localhost:5432/leads"
+
+# Environment variable names a hosting platform may use for the connection
+# string. ``DATABASE_URL`` is the documented primary; the others are common
+# aliases so a provider that injects the value under a different name still
+# connects to the provisioned database.
+DATABASE_URL_ENV_VARS = (
+    "DATABASE_URL",
+    "DATABASE_URI",
+    "POSTGRES_URL",
+    "POSTGRESQL_URL",
+    "DB_URL",
+)
 
 
 class Settings(BaseSettings):
@@ -37,7 +54,7 @@ class Settings(BaseSettings):
     )
 
     # --- database --------------------------------------------------------
-    database_url: str = "postgresql+psycopg://lead:lead@localhost:5432/leads"
+    database_url: str = DEFAULT_DATABASE_URL
     # Production-safe default: the schema must be managed with `alembic upgrade head`.
     # Local development opts in via AUTO_CREATE_SCHEMA=true (.env / docker-compose).
     auto_create_schema: bool = False
@@ -108,6 +125,26 @@ class Settings(BaseSettings):
         ]
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_database_url(cls, values: object) -> object:
+        """Resolve the connection string from the platform environment.
+
+        An explicit value (constructor argument or ``DATABASE_URL``) always
+        wins. Otherwise the conventional aliases are consulted, skipping blank
+        values, so a platform that exposes an empty ``DATABASE_URL`` but a
+        populated ``POSTGRES_URL`` (or similar) still connects.
+        """
+        if isinstance(values, dict):
+            current = values.get("database_url")
+            if not (isinstance(current, str) and current.strip()):
+                for name in DATABASE_URL_ENV_VARS:
+                    candidate = os.environ.get(name)
+                    if candidate and candidate.strip():
+                        values["database_url"] = candidate.strip()
+                        break
+        return values
+
     @field_validator("database_url")
     @classmethod
     def _normalize_database_url(cls, value: str) -> str:
@@ -143,6 +180,22 @@ class Settings(BaseSettings):
         if self.nurture_threshold >= self.qualified_threshold:
             raise ValueError("NURTURE_THRESHOLD must be lower than QUALIFIED_THRESHOLD")
         return self
+
+
+def describe_database_url(url: str) -> str:
+    """Describe a SQLAlchemy URL for logs without exposing credentials."""
+    from sqlalchemy.engine import make_url
+
+    try:
+        parsed = make_url(url)
+    except Exception:  # noqa: BLE001 - logging must never raise on a bad URL
+        return "<unparseable database URL>"
+    return "{}://{}:{}/{}".format(
+        parsed.drivername,
+        parsed.host or "<no host>",
+        parsed.port or "<default port>",
+        parsed.database or "<no database>",
+    )
 
 
 @lru_cache(maxsize=1)

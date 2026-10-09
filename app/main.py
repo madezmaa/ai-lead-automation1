@@ -12,11 +12,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.config import Settings, get_settings
+from app.config import DEFAULT_DATABASE_URL, Settings, describe_database_url, get_settings
 from app.db import configure_engine, create_schema
 from app.errors import DuplicateLeadError, LeadNotFoundError, NotQualifiedError
 from app.routers import health, leads
 from app.state_machine import InvalidTransitionError
+
+logger = logging.getLogger(__name__)
 
 
 def configure_logging(level: str) -> None:
@@ -44,6 +46,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         configure_engine(resolved.database_url)
         if resolved.auto_create_schema:
             create_schema()
+        logger.info(
+            "Database target: %s (auto_create_schema=%s)",
+            describe_database_url(resolved.database_url),
+            resolved.auto_create_schema,
+        )
+        if (
+            resolved.database_url == DEFAULT_DATABASE_URL
+            and resolved.environment.strip().lower() not in {"development", "test"}
+        ):
+            logger.warning(
+                "DATABASE_URL is not set (environment=%r); the app is using the "
+                "local-development database. Provision the platform database and set "
+                "DATABASE_URL so production never targets localhost.",
+                resolved.environment,
+            )
         yield
 
     app = FastAPI(

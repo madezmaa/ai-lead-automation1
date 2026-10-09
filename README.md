@@ -196,6 +196,25 @@ database + one Docker web service. The service serves the API under `/api/v1`, t
 3. Render provisions Postgres, builds the `Dockerfile`, runs `alembic upgrade head`
    (`preDeployCommand`), then starts the API and health-checks `/health`.
 
+### Hosts without a pre-deploy hook (e.g. Blitz)
+
+The image is portable to any container host, including platforms that start the container
+directly with no pre-deploy step (Blitz, Fly.io, Railway, a VM, `docker compose`).
+[`docker-entrypoint.sh`](docker-entrypoint.sh) runs `alembic upgrade head` before the app starts:
+
+- `AUTO_CREATE_SCHEMA=true` → skip migrations (local dev creates the schema in-app).
+- a database URL is configured → apply the forward, additive revisions (retry, then fail fast).
+- no database URL is configured → skip and warn, so `/demo/` still loads (app + `/health` show
+  the database as down).
+
+**Database configuration is required.** The app reads the connection string from `DATABASE_URL`
+(the documented name); `DATABASE_URI`, `POSTGRES_URL`, `POSTGRESQL_URL` and `DB_URL` are also
+accepted, and a blank `DATABASE_URL` falls through to them. With none of these set the app falls
+back to the local-development default (`…@localhost:5432/leads`) — a warning is logged at startup
+and `/health` reports the database as down. On Blitz, ensure the provisioned PostgreSQL is
+attached and the `DATABASE_URL` variable is populated, then redeploy so the running container
+receives it.
+
 Notes:
 
 - **AI:** the AI layer targets a *local* Ollama server, unreachable from a hosted free-tier
@@ -203,15 +222,14 @@ Notes:
   the deterministic rules engine (`fallback_used=true`) and the demo labels the engine accordingly.
   To enable AI, self-host an Ollama (or OpenAI-compatible) endpoint reachable from the service and
   set `OLLAMA_BASE_URL`.
-- **Schema:** with `AUTO_CREATE_SCHEMA=false` the app never creates tables; migrations are the
-  source of truth. If your plan has no pre-deploy commands, set `AUTO_CREATE_SCHEMA=true` (dev
-  convenience) or run `alembic upgrade head` once as a job.
+- **Schema:** with `AUTO_CREATE_SCHEMA=false` the app never creates tables itself; migrations are
+  the source of truth. The container entrypoint applies them at startup (see above), so a platform
+  without a pre-deploy command is covered.
 - **Outbound:** notifications/email stay dry-run (`DRY_RUN=true`) until you set `NOTIFY_WEBHOOK_URL`
   / `EMAIL_API_KEY`; nothing reaches a real customer by default.
 - Set `API_KEY` to require `X-API-Key` on every `/api/v1` route.
 
-The image is portable to any container host (Fly.io, Railway, a VM, `docker compose`):
-`docker build -t lead-api . && docker run -p 8000:8000 -e DATABASE_URL=... lead-api`.
+`docker build -t lead-api . && docker run -p 8000:8000 -e DATABASE_URL=… lead-api`.
 
 ## n8n workflow
 
@@ -314,11 +332,12 @@ app/
   security.py        API-key dependency
   routers/           leads + health endpoints
 migrations/          Alembic migrations
-tests/               160 unit/API/live/browser tests
+tests/               170+ unit/API/live/browser tests
 demo/                 static browser demo (index.html, app.js, config.js, style.css)
 scripts/             smoke_test.ps1 / smoke_test.sh
 n8n/workflow.json    importable n8n workflow
-Dockerfile, docker-compose.yml, render.yaml, .github/workflows/ci.yml
+Dockerfile, docker-entrypoint.sh, docker-compose.yml, render.yaml,
+.github/workflows/ci.yml
 ```
 
 ## Known limitations
