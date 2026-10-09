@@ -226,3 +226,28 @@ class TestAuth:
     def test_health_is_open_without_key(self, test_client_factory) -> None:
         with test_client_factory(api_key="secret-key") as client:
             assert client.get("/health").status_code == 200
+
+
+class TestCors:
+    """The static demo on :5500 is a separate origin and must be allowed."""
+
+    def test_demo_origin_allowed_on_simple_request(self, client) -> None:
+        response = client.get("/health", headers={"Origin": "http://localhost:5500"})
+        assert response.headers.get("access-control-allow-origin") == "http://localhost:5500"
+
+    def test_unknown_origin_gets_no_cors_header(self, client) -> None:
+        response = client.get("/health", headers={"Origin": "http://evil.example"})
+        assert "access-control-allow-origin" not in response.headers
+
+    def test_preflight_allows_demo_post(self, client) -> None:
+        response = client.options(
+            "/api/v1/leads",
+            headers={
+                "Origin": "http://localhost:5500",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "http://localhost:5500"
+        assert "POST" in response.headers.get("access-control-allow-methods", "")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -27,10 +26,14 @@ target_metadata = Base.metadata
 
 
 def _database_url() -> str:
-    """Prefer an explicit DATABASE_URL env var, else the app settings."""
-    url = os.environ.get("DATABASE_URL") or get_settings().database_url
+    """Resolve the database URL through the app settings.
+
+    Settings read ``DATABASE_URL`` from the environment (and ``.env``) and
+    normalize managed-provider URLs to a driver-qualified scheme, so migrations
+    and the application always agree.
+    """
     # SQLAlchemy URLs may contain % characters that configparser would mangle.
-    return url.replace("%", "%%")
+    return get_settings().database_url.replace("%", "%%")
 
 
 def run_migrations_offline() -> None:

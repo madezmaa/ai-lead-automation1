@@ -80,8 +80,9 @@ class TestNotificationLog:
         client.post(f"/api/v1/leads/{lead['id']}/qualify", json={"use_ai": False})
 
         log = client.get(f"/api/v1/leads/{lead['id']}/notifications").json()
-        assert log["total"] == 1
-        entry = log["items"][0]
+        entries = [item for item in log["items"] if item["channel"] == "webhook"]
+        assert len(entries) == 1
+        entry = entries[0]
         assert entry["status"] == "skipped"
         assert entry["event"] == "lead.qualified"
         assert entry["target"] is None
@@ -97,7 +98,7 @@ class TestNotificationLog:
         client.post(f"/api/v1/leads/{lead['id']}/qualify", json={"use_ai": False})
 
         log = client.get(f"/api/v1/leads/{lead['id']}/notifications").json()
-        entry = log["items"][0]
+        entry = next(item for item in log["items"] if item["channel"] == "webhook")
         assert entry["status"] == "delivered"
         assert entry["target"] == "http://hook.local/q"
         assert entry["error"] is None
@@ -119,7 +120,7 @@ class TestNotificationLog:
         assert response.status_code == 200
 
         log = client.get(f"/api/v1/leads/{lead['id']}/notifications").json()
-        entry = log["items"][0]
+        entry = next(item for item in log["items"] if item["channel"] == "webhook")
         assert entry["status"] == "failed"
         assert "HTTP 500" in entry["error"]
 

@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     api_key: str | None = None
     log_level: str = "INFO"
+    # Origins allowed by the browser CORS policy (the static demo runs on :5500).
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5500",
+            "http://127.0.0.1:5500",
+        ]
+    )
 
     # --- database --------------------------------------------------------
     database_url: str = "postgresql+psycopg://lead:lead@localhost:5432/leads"
@@ -46,6 +53,12 @@ class Settings(BaseSettings):
     # --- notifications ---------------------------------------------------
     notify_webhook_url: str | None = None
     notify_timeout_seconds: float = Field(default=3.0, gt=0)
+
+    # --- speed-to-lead email ---------------------------------------------
+    # DRY_RUN=true (default) logs the reply as `skipped` instead of sending it.
+    dry_run: bool = True
+    email_api_key: str | None = None
+    email_from: str = "AI Lead Automation <leads@example.com>"
 
     # --- qualification ---------------------------------------------------
     ai_blend_weight: float = Field(default=0.6, ge=0.0, le=1.0)
@@ -94,6 +107,21 @@ class Settings(BaseSettings):
             "mail.com",
         ]
     )
+
+    @field_validator("database_url")
+    @classmethod
+    def _normalize_database_url(cls, value: str) -> str:
+        """Accept the bare URLs handed out by managed providers.
+
+        Render/Supabase hand out ``postgres://...`` or ``postgresql://...``
+        without a driver, which SQLAlchemy would resolve to psycopg2. Only
+        psycopg (v3) is installed, so qualify the scheme explicitly.
+        """
+        if value.startswith("postgres://"):
+            value = "postgresql://" + value[len("postgres://") :]
+        if value.startswith("postgresql://"):
+            value = "postgresql+psycopg://" + value[len("postgresql://") :]
+        return value
 
     @field_validator("ollama_base_url")
     @classmethod

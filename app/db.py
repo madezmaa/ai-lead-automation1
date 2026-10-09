@@ -36,6 +36,10 @@ def configure_engine(url: str, *, echo: bool = False) -> Engine:
         kwargs["connect_args"] = {"check_same_thread": False}
         if ":memory:" in url:
             kwargs["poolclass"] = StaticPool
+    elif url.startswith("postgresql"):
+        # psycopg waits for a TCP connection indefinitely by default, which
+        # stalled the startup lifespan when the server was unreachable.
+        kwargs["connect_args"] = {"connect_timeout": 5}
 
     _engine = create_engine(url, echo=echo, pool_pre_ping=not url.startswith("sqlite"), **kwargs)
     _configured_url = url

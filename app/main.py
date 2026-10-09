@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.config import Settings, get_settings
@@ -56,8 +59,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = resolved
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=resolved.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     app.include_router(health.router)
     app.include_router(leads.router)
+
+    # Optionally serve the static demo from the same origin so a single public
+    # deployment exposes both the API and the demo (no CORS / separate host).
+    demo_dir = Path(__file__).resolve().parent.parent / "demo"
+    if demo_dir.is_dir():
+        app.mount("/demo", StaticFiles(directory=str(demo_dir), html=True), name="demo")
+
+        @app.get("/", include_in_schema=False)
+        async def _root() -> RedirectResponse:
+            return RedirectResponse(url="/demo/")
 
     register_exception_handlers(app)
     return app

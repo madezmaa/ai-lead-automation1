@@ -132,6 +132,45 @@ alembic revision --autogenerate -m "describe change"   # after editing models
 alembic check                 # fail if models and migrations drift apart
 ```
 
+## Browser demo (demo/)
+
+[`demo/index.html`](demo/index.html) is a dependency-free static page that drives the real API —
+every score, classification, scoring factor, CRM record and notification shown is produced by the
+live service, nothing is faked in the browser.
+
+The simplest way to run it is to let the API serve it (same origin, so no CORS setup is needed):
+
+```powershell
+.\.venv\Scripts\uvicorn app.main:app --reload
+# → open http://127.0.0.1:8000/demo/
+```
+
+To serve the static files separately during development instead:
+
+```powershell
+# terminal 1 — API (repository root)
+.\.venv\Scripts\uvicorn app.main:app --reload
+
+# terminal 2 — static page
+.\.venv\Scripts\python.exe -m http.server 5500 --directory demo
+# → open http://localhost:5500
+```
+
+[`demo/config.js`](demo/config.js) chooses which API the page talks to. Its default (empty config)
+auto-detects the backend: `localhost`/`file:` → `http://localhost:8000`, any other host → **same
+origin** as the page (the production case). Override it for a remote API with
+`window.LEAD_DEMO_CONFIG = { apiBaseUrl: "https://your-api.example.com" }`. A separately-served
+origin must be listed in `CORS_ORIGINS` (default `http://localhost:5500`, `http://127.0.0.1:5500`),
+which configures the middleware in [`app/main.py`](app/main.py).
+
+The page is organised into **Overview**, **How it works**, a **Live demo** and a **Request a demo**
+call to action. Pick a hot/warm/cold sample lead (or fill in the form) and press **Run AI
+Qualification**. The page then calls `POST /api/v1/leads` → `POST /leads/{id}/qualify` →
+`GET /leads/{id}/crm-record` → `GET /leads/{id}/notifications` and animates the 7-step pipeline:
+lead creation, deterministic rules scoring with itemized factors, AI assessment, blended
+score/classification, recommended action, CRM record and the sales alert log. Duplicate emails reuse
+the existing lead, so a sample can be re-run to re-qualify it.
+
 ## Docker Compose
 
 ```bash
@@ -144,6 +183,35 @@ The `api` service points `DATABASE_URL` at the `db` service and Ollama at
 non-localhost connections (`OLLAMA_HOST=0.0.0.0`) for the *container* to reach it;
 otherwise qualifications still succeed via the deterministic fallback (verified in
 `BUILD_REPORT.md`).
+
+## Deployment
+
+[`render.yaml`](render.yaml) is a ready-made [Render](https://render.com) blueprint: one Postgres
+database + one Docker web service. The service serves the API under `/api/v1`, the docs under
+`/docs`, and the demo under `/demo` — a **single origin**, so no CORS configuration is required
+(`/` redirects to `/demo/`).
+
+1. Push the repository to GitHub.
+2. Render → **New → Blueprint**, pick the repo; Render reads `render.yaml`.
+3. Render provisions Postgres, builds the `Dockerfile`, runs `alembic upgrade head`
+   (`preDeployCommand`), then starts the API and health-checks `/health`.
+
+Notes:
+
+- **AI:** the AI layer targets a *local* Ollama server, unreachable from a hosted free-tier
+  container, so the blueprint sets `OLLAMA_ENABLED=false`. Qualification still runs end-to-end on
+  the deterministic rules engine (`fallback_used=true`) and the demo labels the engine accordingly.
+  To enable AI, self-host an Ollama (or OpenAI-compatible) endpoint reachable from the service and
+  set `OLLAMA_BASE_URL`.
+- **Schema:** with `AUTO_CREATE_SCHEMA=false` the app never creates tables; migrations are the
+  source of truth. If your plan has no pre-deploy commands, set `AUTO_CREATE_SCHEMA=true` (dev
+  convenience) or run `alembic upgrade head` once as a job.
+- **Outbound:** notifications/email stay dry-run (`DRY_RUN=true`) until you set `NOTIFY_WEBHOOK_URL`
+  / `EMAIL_API_KEY`; nothing reaches a real customer by default.
+- Set `API_KEY` to require `X-API-Key` on every `/api/v1` route.
+
+The image is portable to any container host (Fly.io, Railway, a VM, `docker compose`):
+`docker build -t lead-api . && docker run -p 8000:8000 -e DATABASE_URL=... lead-api`.
 
 ## n8n workflow
 
@@ -166,19 +234,25 @@ All settings come from environment variables / `.env` (see [`.env.example`](.env
 |---|---|---|
 | `DATABASE_URL` | `postgresql+psycopg://lead:lead@localhost:5432/leads` | SQLAlchemy URL (PostgreSQL/Supabase/SQLite) |
 | `AUTO_CREATE_SCHEMA` | `false` (dev `.env`: `true`) | Create tables on startup instead of using Alembic |
+| `ENVIRONMENT` | `development` | Free-form environment label |
 | `API_KEY` | *(unset)* | When set, all `/api/v1` endpoints require `X-API-Key` |
+| `CORS_ORIGINS` | `["http://localhost:5500","http://127.0.0.1:5500"]` | Browser origins allowed by CORS (JSON array) for the separately-served static demo |
 | `LOG_LEVEL` | `INFO` | Root logging level |
 | `OLLAMA_ENABLED` | `true` | Use the AI layer |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
 | `OLLAMA_MODEL` | `llama3.2:3b` | Model name |
 | `OLLAMA_TIMEOUT_SECONDS` | `120` | Per-request timeout |
 | `OLLAMA_MAX_RETRIES` | `2` | Attempts for transient failures |
+| `OLLAMA_MAX_TOKENS` | `512` | Max tokens per AI completion |
 | `AI_BLEND_WEIGHT` | `0.6` | AI share of the blended score (0..1) |
 | `QUALIFIED_THRESHOLD` / `NURTURE_THRESHOLD` | `70` / `40` | Decision thresholds |
 | `MIN_BUDGET` | `1000` | Hard budget disqualifier |
 | `TARGET_INDUSTRIES` / `TARGET_COUNTRIES` / `FREE_EMAIL_DOMAINS` | see file | JSON arrays |
 | `NOTIFY_WEBHOOK_URL` | *(unset)* | Outbound notification webhook after qualification |
 | `NOTIFY_TIMEOUT_SECONDS` | `3` | Webhook timeout |
+| `DRY_RUN` | `true` | Speed-to-lead email is logged as `skipped` instead of sent |
+| `EMAIL_API_KEY` | *(unset)* | Resend API key; required to actually send when `DRY_RUN=false` |
+| `EMAIL_FROM` | `AI Lead Automation <leads@example.com>` | `From` header for the speed-to-lead reply |
 
 ## State machine
 
@@ -200,7 +274,7 @@ truth; anything else returns **409 `invalid_transition`**.
 ```powershell
 .\.venv\Scripts\ruff.exe check .          # lint
 .\.venv\Scripts\ruff.exe format .         # format
-.\.venv\Scripts\python.exe -m pytest      # 146 tests (SQLite by default)
+.\.venv\Scripts\python.exe -m pytest      # 160 tests (SQLite by default)
 
 # same suite against real PostgreSQL:
 $env:TEST_DATABASE_URL='postgresql+psycopg://lead:lead@localhost:5432/leads_test'
@@ -240,10 +314,11 @@ app/
   security.py        API-key dependency
   routers/           leads + health endpoints
 migrations/          Alembic migrations
-tests/               146 unit/API/live tests
+tests/               160 unit/API/live/browser tests
+demo/                 static browser demo (index.html, app.js, config.js, style.css)
 scripts/             smoke_test.ps1 / smoke_test.sh
 n8n/workflow.json    importable n8n workflow
-Dockerfile, docker-compose.yml, .github/workflows/ci.yml
+Dockerfile, docker-compose.yml, render.yaml, .github/workflows/ci.yml
 ```
 
 ## Known limitations

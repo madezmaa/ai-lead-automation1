@@ -14,7 +14,7 @@ from app.crm import build_crm_record
 from app.db import get_db
 from app.domain import LeadProfile
 from app.models import NotificationLog
-from app.notifications import qualification_payload, send_webhook
+from app.notifications import qualification_payload, send_email, send_webhook
 from app.schemas import (
     CrmRecordRead,
     FollowUpDraftRead,
@@ -157,6 +157,40 @@ def qualify_lead_endpoint(
         )
     )
     db.commit()
+
+    # Speed-to-lead reply: one automatic email right after a qualified (HOT)
+    # lead. Opt-out / hard-disqualified leads are never contacted.
+    if result.decision == "qualified" and not (result.rules_output or {}).get("hard_disqualified"):
+        draft = render_follow_up_template(LeadProfile.from_lead(lead), tone="friendly")
+        if settings.dry_run:
+            email_status, email_error = "skipped", "DRY_RUN=true - email not sent (dry run)"
+        else:
+            email_failure: list[str] = []
+            delivered = send_email(
+                api_key=settings.email_api_key,
+                sender=settings.email_from,
+                to=lead.email,
+                subject=draft.subject,
+                body=draft.body,
+                timeout=settings.notify_timeout_seconds,
+                on_error=email_failure.append,
+            )
+            email_status = "delivered" if delivered else "failed"
+            email_error = (
+                None if delivered else (email_failure[0] if email_failure else "delivery failed")
+            )
+        db.add(
+            NotificationLog(
+                lead_id=lead.id,
+                event=event,
+                channel="email",
+                target=lead.email,
+                status=email_status,
+                error=email_error,
+            )
+        )
+        db.commit()
+
     return QualificationResultRead.model_validate(result)
 
 
