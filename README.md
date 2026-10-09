@@ -206,6 +206,10 @@ directly with no pre-deploy step (Blitz, Fly.io, Railway, a VM, `docker compose`
 - a database URL is configured → apply the forward, additive revisions (retry, then fail fast).
 - no database URL is configured → skip and warn, so `/demo/` still loads (app + `/health` show
   the database as down).
+- `migrations/` is **not packaged** by the platform build (observed on blitz.cloud when its
+  `docker-compose.yml`-driven build drops the folder) → warn and force `AUTO_CREATE_SCHEMA=true`
+  so the app still boots and creates its schema. The scripts stay in the repo, so `alembic`
+  keeps working in CI and any host that packages them.
 
 **Database configuration is required.** The app reads the connection string from `DATABASE_URL`
 (the documented name); `DATABASE_URI`, `POSTGRES_URL`, `POSTGRESQL_URL` and `DB_URL` are also

@@ -26,6 +26,18 @@ do
     fi
 done
 
+# Some container platforms build the image without the alembic scripts folder
+# (e.g. blitz.cloud when docker-compose.yml drives the build). Without the
+# scripts the migration CLI cannot run, so fall back to the app creating its
+# own schema. This keeps the container bootable; migration scripts never leave
+# the repo, so alembic keeps working in CI and on any host that packages them.
+REPO_DIR="${REPO_DIR:-$(pwd)}"
+if [ ! -d "${REPO_DIR}/migrations" ]; then
+    echo "[entrypoint] WARNING: migrations/ is not packaged (looked in ${REPO_DIR});" >&2
+    echo "[entrypoint] forcing AUTO_CREATE_SCHEMA=true so the app creates its schema." >&2
+    export AUTO_CREATE_SCHEMA=true
+fi
+
 if [ "${AUTO_CREATE_SCHEMA:-false}" = "true" ]; then
     echo "[entrypoint] AUTO_CREATE_SCHEMA=true; the app creates the schema; skipping migrations."
 elif [ "$url_configured" -eq 1 ]; then

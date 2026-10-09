@@ -32,6 +32,12 @@ def test_entrypoint_script_has_valid_shell_syntax():
     assert result.returncode == 0, result.stderr
 
 
+def test_entrypoint_falls_back_to_in_app_schema_when_scripts_missing():
+    script = (ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
+    assert "migrations/" in script and "AUTO_CREATE_SCHEMA=true" in script
+    assert "forcing" in script
+
+
 def test_dockerfile_applies_migrations_before_start():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh" in dockerfile
