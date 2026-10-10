@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from app.config import Settings
 from app.domain import Decision, LeadProfile, RuleFactor, RulesResult, decision_for_score
-from app.normalization import is_free_email
+from app.normalization import email_domain, is_free_email, is_reserved_email_domain
 
 _INTENT_KEYWORDS = (
     "pricing",
@@ -54,6 +54,20 @@ _SENIOR_TITLE_WORDS = (
 )
 _REFERRAL_SOURCES = ("referral", "partner", "affiliate", "agency-partner")
 
+# Timeline / urgency signals taken from the free-text message (the demo and most
+# web forms fold the requested timeline into the message). Immediate needs score
+# higher than near-term ones; an absent timeline is neutral.
+_IMMEDIATE_TIMELINE_KEYWORDS = (
+    "asap",
+    "as soon as possible",
+    "immediately",
+    "urgent",
+    "right away",
+    "today",
+    "this week",
+)
+_NEAR_TIMELINE_KEYWORDS = ("week", "month", "quarter")
+
 _MAX_SCORE = 100
 _MIN_SCORE = 0
 
@@ -77,6 +91,18 @@ def _budget_points(budget: float | None, min_budget: float) -> tuple[int, str]:
     if budget >= min_budget:
         return 10, f"budget >= ${min_budget:,.0f} (${budget:,.0f})"
     return -10, f"budget below floor (${budget:,.0f})"
+
+
+def _timeline_points(message: str | None) -> tuple[int, str]:
+    """Score the requested timeline/urgency found in the lead's message."""
+    if not message:
+        return 0, "no timeline mentioned"
+    lowered = message.lower()
+    if any(keyword in lowered for keyword in _IMMEDIATE_TIMELINE_KEYWORDS):
+        return 15, "immediate timeline (ASAP / this week)"
+    if any(keyword in lowered for keyword in _NEAR_TIMELINE_KEYWORDS):
+        return 10, "near-term timeline (weeks/months)"
+    return 0, "no timeline mentioned"
 
 
 def _company_size_points(size: int | None) -> tuple[int, str]:
@@ -110,11 +136,15 @@ def evaluate_rules(profile: LeadProfile, settings: Settings) -> RulesResult:
     factors.append(_factor("budget", *_budget_points(profile.budget, settings.min_budget)))
     factors.append(_factor("company_size", *_company_size_points(profile.company_size)))
 
-    domain = profile.email.rsplit("@", 1)[-1].lower()
+    domain = email_domain(profile.email)
     if is_free_email(profile.email, settings.free_email_domains):
-        factors.append(RuleFactor("email", -5, f"free consumer mailbox ({domain})"))
+        factors.append(RuleFactor("email", -5, f"consumer mailbox ({domain})"))
+    elif is_reserved_email_domain(profile.email):
+        # example.com / .example / .test / … are not deliverable mailboxes, so
+        # they earn neither business-email credit nor a consumer penalty.
+        factors.append(RuleFactor("email", 0, f"reserved/test domain ({domain})"))
     else:
-        factors.append(RuleFactor("email", 10, f"business mailbox ({domain})"))
+        factors.append(RuleFactor("email", 10, f"non-consumer email domain ({domain})"))
 
     if profile.industry:
         industry = profile.industry.lower()
@@ -139,6 +169,8 @@ def evaluate_rules(profile: LeadProfile, settings: Settings) -> RulesResult:
         factors.append(RuleFactor("intent", 15, "buying-intent keywords in message"))
     else:
         factors.append(RuleFactor("intent", 0, "no buying-intent keywords in message"))
+
+    factors.append(RuleFactor("timeline", *_timeline_points(message)))
 
     completeness = sum(
         1

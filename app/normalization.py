@@ -151,7 +151,35 @@ def normalize_country(value: str | None) -> tuple[str | None, str | None]:
     return raw, None
 
 
+def email_domain(email: str) -> str:
+    """Return the lower-cased domain part of an email address."""
+    return email.rsplit("@", 1)[-1].lower().strip(".")
+
+
+# Domains/domains-with-suffixes reserved for testing and examples (RFC 2606 /
+# RFC 6761). They are not deliverable mailboxes, so they must never be scored
+# as if they were a real business email.
+_RESERVED_EXAMPLE_DOMAINS = frozenset({"example.com", "example.org", "example.net"})
+_RESERVED_EXAMPLE_TLDS = (".example", ".test", ".invalid", ".localhost", ".local")
+_RESERVED_EXAMPLE_NAMES = frozenset({"example", "localhost", "test", "invalid"})
+
+
 def is_free_email(email: str, free_domains: list[str] | tuple[str, ...]) -> bool:
     """True when the email uses a consumer mailbox provider."""
-    domain = email.rsplit("@", 1)[-1].lower()
-    return domain in {d.lower() for d in free_domains}
+    return email_domain(email) in {d.lower() for d in free_domains}
+
+
+def is_reserved_email_domain(email: str) -> bool:
+    """True for RFC 2606 / RFC 6761 reserved (non-deliverable) example domains.
+
+    Covers ``example.com``/``example.org``/``example.net`` and the reserved
+    ``.example``, ``.test``, ``.invalid``, ``.localhost`` and ``.local`` TLDs so
+    demo/test addresses like ``john@apexgrowth.example`` are never treated as a
+    real business mailbox.
+    """
+    domain = email_domain(email)
+    if not domain:
+        return True
+    if domain in _RESERVED_EXAMPLE_DOMAINS or domain in _RESERVED_EXAMPLE_NAMES:
+        return True
+    return domain.endswith(_RESERVED_EXAMPLE_TLDS)

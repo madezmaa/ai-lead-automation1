@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 
 from app.normalization import (
+    email_domain,
     is_free_email,
+    is_reserved_email_domain,
     normalize_country,
     normalize_email,
     normalize_name,
@@ -96,6 +98,34 @@ class TestFreeEmail:
 
     def test_business(self) -> None:
         assert not is_free_email("x@acme.io", ["gmail.com", "yahoo.com"])
+
+
+class TestReservedEmailDomain:
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "john@apexgrowth.example",
+            "david@example.com",
+            "a@example.org",
+            "b@example.net",
+            "c@service.test",
+            "d@host.invalid",
+            "e@dev.localhost",
+            "f@box.local",
+        ],
+    )
+    def test_reserved(self, address: str) -> None:
+        assert is_reserved_email_domain(address)
+
+    @pytest.mark.parametrize(
+        "address",
+        ["alex@acme.io", "x@gmail.com", "y@company.co.uk", "z@northstar.example.com.co"],
+    )
+    def test_not_reserved(self, address: str) -> None:
+        assert not is_reserved_email_domain(address)
+
+    def test_email_domain_helper(self) -> None:
+        assert email_domain("John@ApexGrowth.Example") == "apexgrowth.example"
 
 
 class TestLeadCreateSchema:
