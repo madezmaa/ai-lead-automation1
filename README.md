@@ -296,7 +296,7 @@ truth; anything else returns **409 `invalid_transition`**.
 ```powershell
 .\.venv\Scripts\ruff.exe check .          # lint
 .\.venv\Scripts\ruff.exe format .         # format
-.\.venv\Scripts\python.exe -m pytest      # 160 tests (SQLite by default)
+.\.venv\Scripts\python.exe -m pytest      # 208 tests (SQLite by default)
 
 # same suite against real PostgreSQL:
 $env:TEST_DATABASE_URL='postgresql+psycopg://lead:lead@localhost:5432/leads_test'
@@ -336,7 +336,7 @@ app/
   security.py        API-key dependency
   routers/           leads + health endpoints
 migrations/          Alembic migrations
-tests/               170+ unit/API/live/browser tests
+tests/               208 unit/API/live/browser tests
 demo/                 static browser demo (index.html, app.js, config.js, style.css)
 scripts/             smoke_test.ps1 / smoke_test.sh
 n8n/workflow.json    importable n8n workflow
